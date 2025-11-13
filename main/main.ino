@@ -3,6 +3,10 @@
 #include <algorithm>
 
 #define MATRIX_PIN 33
+#define ANALOG_X_PIN 34
+#define ANALOG_Y_PIN 35
+#define ANALOG_BUTTON_PIN 27
+
 #define ROW 8
 #define COL 8
 #define STARTX 1
@@ -12,22 +16,23 @@
 
 Adafruit_NeoPixel matrix(ROW * COL, MATRIX_PIN, NEO_GRB + NEO_KHZ800);
 
-bool running = false;
 bool goalReached = false;
+bool run = false;
+bool canPress = true;
 
 void setPixel(uint16_t x, uint16_t y, uint32_t color);
 
 struct Node {
   Node* parent;
   uint16_t x, y, g, h, f;
-  bool start, goal, solid, open, checked;
+  bool start, goal, solid, open, checked, path;
 
   Node()
       : parent(nullptr), x(0), y(0), g(0), h(0), f(0),
-        start(false), goal(false), solid(false), open(false), checked(false) {}
+        start(false), goal(false), solid(false), open(false), checked(false), path(false) {}
 
   Node(uint16_t x, uint16_t y)
-      : parent(nullptr), x(x), y(y), start(false), goal(false), solid(false), open(false), checked(false) {
+      : parent(nullptr), x(x), y(y), start(false), goal(false), solid(false), open(false), checked(false), path(false) {
         uint16_t xDistance = abs(x - STARTX);
         uint16_t yDistance = abs(y - STARTY);
         g = xDistance + yDistance;
@@ -43,15 +48,15 @@ struct Node {
   }
   void setAsStart(void) {
     start = true;
-    setPixel(x, y, matrix.Color(0, 200, 200));
+    //setPixel(x, y, matrix.Color(0, 200, 200));
   }
   void setAsGoal(void) {
     goal = true;
-    setPixel(x, y, matrix.Color(0, 230, 0));
+    //setPixel(x, y, matrix.Color(0, 230, 0));
   }
   void setAsSolid(void) {
     solid = true;
-    setPixel(x, y, matrix.Color(200, 200, 200));
+    //setPixel(x, y, matrix.Color(200, 200, 200));
   }
   void unset(void) {
     start = false;
@@ -59,7 +64,8 @@ struct Node {
     solid = false;
     open = false;
     checked = false;
-    setPixel(x, y, 0);
+    path = false;
+    //setPixel(x, y, 0);
   }
 
   void setAsOpen(void) {
@@ -67,12 +73,12 @@ struct Node {
   }
   void setAsChecked(void) {
     checked = true;
-    if(start == false && goal == false) {
-      setPixel(x, y, matrix.Color(255, 165, 0));
-    }
+    // if(start == false && goal == false) {
+    //   setPixel(x, y, matrix.Color(255, 165, 0));
+    // }
   }
   void setAsPath(void) {
-    setPixel(x, y, matrix.Color(255, 0, 0));
+    path = true;
   }
 };
 
@@ -86,6 +92,10 @@ void setPixel(uint16_t x, uint16_t y, uint32_t color) {
 }
 
 void resetMatrix(void) {
+  goalReached = false;
+  canPress = true;
+  run = false;
+
   for (uint16_t y = 0; y < ROW; y++) {
     for (uint16_t x = 0; x < COL; x++) {
       grid[y][x] = Node(x, y);
@@ -161,13 +171,16 @@ void search(void) {
 
     if (currentNode->x == GOALX && currentNode->y == GOALY) {
       goalReached = true;
+      canPress = true;
       trackPath();
     }
   }
 }
 
-
 void setup() {
+  Serial.begin(115200);
+  pinMode(ANALOG_BUTTON_PIN, INPUT_PULLUP);
+
   matrix.begin();
   matrix.setBrightness(1); 
   matrix.clear();
@@ -177,16 +190,132 @@ void setup() {
   matrix.show();
 }
 
-uint16_t cursorX = 0, cursorY = 0;
+void render(void) {
+  for(uint16_t y = 0; y < ROW; y++) {
+    for(uint16_t x = 0; x < COL; x++) {
+      if(grid[y][x].start) {
+        setPixel(x, y, matrix.Color(0, 200, 200));
+      } else if(grid[y][x].goal) {
+        setPixel(x, y, matrix.Color(0, 230, 0));
+      } else if(grid[y][x].solid) {
+        setPixel(x, y, matrix.Color(200, 200, 200));
+      } else if(grid[y][x].path) {
+        setPixel(x, y, matrix.Color(255, 0, 0));
+      } else if(grid[y][x].checked) {
+        if(!grid[y][x].start && !grid[y][x].goal) {
+         setPixel(x, y, matrix.Color(255, 165, 0));
+        }
+      }
+    }
+  }
+}
+
+void softReset(void) {
+  openList.clear();
+  checkedList.clear();
+  // goalReached = false;
+  for(uint16_t y = 0; y < ROW; y++) {
+    for(uint16_t x = 0; x < COL; x++) {
+      if(grid[y][x].checked || grid[y][x].open) {
+        if(!grid[y][x].start && !grid[y][x].goal){
+          grid[y][x].unset();
+          setPixel(x, y, 0);
+        }else {
+          grid[y][x].checked = false;
+          grid[y][x].open = false;
+        }
+      }
+    }
+  }
+}
+
+int cursorX = 0;
+int cursorY = 0;
+bool canMoveX = true;
+bool canMoveY = true;
 
 void loop() {
+  
+  //handle joystick and buttons
 
-  //if(!running) setPixel(cursorX-1, cursorY-1, 0);
+  int cursorRawX = analogRead(ANALOG_X_PIN);
+  int cursorRawY = analogRead(ANALOG_Y_PIN);
+  int pressed = digitalRead(ANALOG_BUTTON_PIN);
+
+  if(!pressed && canPress) {
+      canPress = false;
+      run = !run;
+  }
+  if(!pressed && goalReached) {
+    ESP.restart();
+  }
 
 
-  search();
+
+  Serial.print(cursorRawX);
+  Serial.print(" | ");
+  Serial.print(cursorRawY);
+  Serial.print(" | ");
+  Serial.print(pressed);
+  Serial.print(" | ");
+  Serial.print(run);
+  Serial.print(" | ");
+  Serial.println(goalReached);
+
+  if(cursorRawX >= 240 && cursorRawX <= 270) canMoveX = true;
+  if(cursorRawY >= 240 && cursorRawY <= 270) canMoveY = true;
+
+  if(canMoveX && !run) {
+    if(cursorRawX >= 2000) {
+      setPixel(cursorX, cursorY, 0);
+      cursorX++;
+      if(cursorX > 7) cursorX = 7;
+      canMoveX = false;
+    } else if(cursorRawX <= 30) {
+      setPixel(cursorX, cursorY, 0);
+      cursorX--;
+      if(cursorX < 0) cursorX = 0;
+      canMoveX = false;
+    }
+  }
+  if(canMoveY && !run) {
+    if(cursorRawY >= 2000) {
+      setPixel(cursorX, cursorY, 0);
+      cursorY++;
+      if(cursorY > 7) cursorY = 7;
+      canMoveY = false;
+    } else if(cursorRawY <= 30) {
+      setPixel(cursorX, cursorY, 0);
+      cursorY--;
+      if(cursorY < 0) cursorY = 0;
+      canMoveY = false;
+    }
+  }
+  
+
+
+  
+
+  //button = place walls
+
+
+
+  if(run) {
+    setPixel(cursorX, cursorY, 0);
+    search();
+  }
+  render();
+
+  if(!run) {
+    setPixel(cursorX, cursorY, matrix.Color(255, 255, 255));
+    softReset();
+  } 
+
   matrix.show();
-  delay(500);
+
+
+
+  if(run) delay(100);
 
   // if(!running){
   //   setCursor(cursorX, cursorY);
