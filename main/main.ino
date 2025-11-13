@@ -6,6 +6,7 @@
 #define ANALOG_X_PIN 34
 #define ANALOG_Y_PIN 35
 #define ANALOG_BUTTON_PIN 27
+#define BUTTON_PIN 26
 
 #define ROW 8
 #define COL 8
@@ -19,6 +20,7 @@ Adafruit_NeoPixel matrix(ROW * COL, MATRIX_PIN, NEO_GRB + NEO_KHZ800);
 bool goalReached = false;
 bool run = false;
 bool canPress = true;
+bool canPressButton = true;
 
 void setPixel(uint16_t x, uint16_t y, uint32_t color);
 
@@ -48,15 +50,12 @@ struct Node {
   }
   void setAsStart(void) {
     start = true;
-    //setPixel(x, y, matrix.Color(0, 200, 200));
   }
   void setAsGoal(void) {
     goal = true;
-    //setPixel(x, y, matrix.Color(0, 230, 0));
   }
   void setAsSolid(void) {
     solid = true;
-    //setPixel(x, y, matrix.Color(200, 200, 200));
   }
   void unset(void) {
     start = false;
@@ -65,7 +64,6 @@ struct Node {
     open = false;
     checked = false;
     path = false;
-    //setPixel(x, y, 0);
   }
 
   void setAsOpen(void) {
@@ -73,9 +71,6 @@ struct Node {
   }
   void setAsChecked(void) {
     checked = true;
-    // if(start == false && goal == false) {
-    //   setPixel(x, y, matrix.Color(255, 165, 0));
-    // }
   }
   void setAsPath(void) {
     path = true;
@@ -103,16 +98,6 @@ void resetMatrix(void) {
   }
   grid[STARTY][STARTX].setAsStart();
   grid[GOALY][GOALX].setAsGoal();
-
-  
-  grid[5][5].setAsSolid();
-  grid[6][5].setAsSolid();
-  grid[4][5].setAsSolid();
-  grid[3][5].setAsSolid();
-  grid[2][5].setAsSolid();
-  grid[1][5].setAsSolid();
-  grid[1][4].setAsSolid();
-  grid[1][3].setAsSolid();
 
 }
 
@@ -180,6 +165,7 @@ void search(void) {
 void setup() {
   Serial.begin(115200);
   pinMode(ANALOG_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   matrix.begin();
   matrix.setBrightness(1); 
@@ -213,7 +199,7 @@ void render(void) {
 void softReset(void) {
   openList.clear();
   checkedList.clear();
-  // goalReached = false;
+  
   for(uint16_t y = 0; y < ROW; y++) {
     for(uint16_t x = 0; x < COL; x++) {
       if(grid[y][x].checked || grid[y][x].open) {
@@ -235,8 +221,6 @@ bool canMoveX = true;
 bool canMoveY = true;
 
 void loop() {
-  
-  //handle joystick and buttons
 
   int cursorRawX = analogRead(ANALOG_X_PIN);
   int cursorRawY = analogRead(ANALOG_Y_PIN);
@@ -249,8 +233,6 @@ void loop() {
   if(!pressed && goalReached) {
     ESP.restart();
   }
-
-
 
   Serial.print(cursorRawX);
   Serial.print(" | ");
@@ -291,14 +273,6 @@ void loop() {
       canMoveY = false;
     }
   }
-  
-
-
-  
-
-  //button = place walls
-
-
 
   if(run) {
     setPixel(cursorX, cursorY, 0);
@@ -307,8 +281,18 @@ void loop() {
   render();
 
   if(!run) {
-    setPixel(cursorX, cursorY, matrix.Color(255, 255, 255));
-    softReset();
+    setPixel(cursorX, cursorY, matrix.Color(255, 0, 255));
+    
+    int button = digitalRead(BUTTON_PIN);
+    if(button) canPressButton = true;
+    if(!button && canPressButton) {
+      canPressButton = false;
+      if(grid[cursorY][cursorX].solid) {
+        grid[cursorY][cursorX].unset();
+      } else if(!grid[cursorY][cursorX].solid && !grid[cursorY][cursorX].start && !grid[cursorY][cursorX].goal) {
+        grid[cursorY][cursorX].setAsSolid();
+      }
+    }
   } 
 
   matrix.show();
@@ -317,11 +301,4 @@ void loop() {
 
   if(run) delay(100);
 
-  // if(!running){
-  //   setCursor(cursorX, cursorY);
-  //   matrix.show();
-  //   delay(500);
-  //   cursorX++;
-  //   cursorY++;
-  // }
 }
